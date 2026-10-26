@@ -1,0 +1,123 @@
+# Personal fork build: the iOS app (Debug) and an unsigned-for-distribution
+# IPA (ad-hoc signed with the entitlements, like upstream's release) to be
+# re-signed with Signulous. Microsoft's runtime DLLs are NOT part of this
+# repository or of the IPA built here; they are added to the IPA locally.
+name: build-ipa
+
+on:
+  workflow_dispatch:
+    inputs:
+      stages:
+        description: "ci/build.sh stages (blank = all)"
+        required: false
+        default: ""
+  push:
+    branches: [skyrim]
+    paths-ignore: ["**.md"]
+
+concurrency:
+  group: build-ipa
+  cancel-in-progress: true
+
+env:
+  LLVM_TAG: llvmorg-15.0.7
+  LLVM_CACHE_KEY: llvm-ios-15.0.7-v1
+
+jobs:
+  llvm-ios:
+    # LLVM for iOS (docs/BUILDING.md, build/dxmt-ios/README.md): the long pole,
+    # built once and cached. Host stage builds llvm-tblgen; iOS stage builds
+    # the libraries airconv links.
+    runs-on: xcode-27
+    timeout-minutes: 300
+    steps:
+      - id: cache
+        uses: actions/cache@v4
+        with:
+          path: |
+            toolchains/llvm-ios-build/lib
+            toolchains/llvm-ios-build/include
+            toolchains/llvm-project/llvm/include
+          key: ${{ env.LLVM_CACHE_KEY }}
+          lookup-only: true
+      - if: steps.cache.outputs.cache-hit != 'true'
+        name: Build LLVM for iOS
+        run: |
+          set -eux
+          brew install ninja || true
+          XC=$(ls -d /Applications/Xcode_27*.app 2>/dev/null | sort -V | tail -1); [ -n "$XC" ] && sudo xcode-select -s "$XC"
+          xcodebuild -version
+          mkdir -p toolchains && cd toolchains
+          git clone --depth 1 --branch "$LLVM_TAG" https://github.com/llvm/llvm-project.git
+          sed -i '' 's/MATCHES "Darwin"/MATCHES "Darwin|iOS"/' llvm-project/llvm/cmake/modules/AddLLVM.cmake
+          cmake -S llvm-project/llvm -B llvm-host-build -G Ninja -DCMAKE_BUILD_TYPE=Release \
+            -DLLVM_TARGETS_TO_BUILD= -DLLVM_ENABLE_PROJECTS= -DLLVM_INCLUDE_TESTS=OFF \
+            -DLLVM_ENABLE_ZLIB=OFF -DLLVM_ENABLE_ZSTD=OFF -DLLVM_ENABLE_TERMINFO=OFF
+          ninja -C llvm-host-build llvm-tblgen
+          cmake -S llvm-project/llvm -B llvm-ios-build -G Ninja \
+            -DCMAKE_SYSTEM_NAME=iOS -DCMAKE_OSX_ARCHITECTURES=arm64 -DCMAKE_OSX_SYSROOT=iphoneos \
+            -DCMAKE_OSX_DEPLOYMENT_TARGET=17.0 -DCMAKE_BUILD_TYPE=Release \
+            -DLLVM_HOST_TRIPLE=arm64-apple-ios17.0 -DLLVM_DEFAULT_TARGET_TRIPLE=arm64-apple-ios17.0 \
+            -DLLVM_TARGET_ARCH=host -DLLVM_TARGETS_TO_BUILD= -DLLVM_ENABLE_PROJECTS= \
+            -DLLVM_BUILD_TOOLS=OFF -DLLVM_BUILD_UTILS=OFF -DLLVM_INCLUDE_TOOLS=OFF -DLLVM_INCLUDE_UTILS=OFF \
+            -DLLVM_INCLUDE_TESTS=OFF -DLLVM_INCLUDE_EXAMPLES=OFF -DLLVM_INCLUDE_BENCHMARKS=OFF \
+            -DLLVM_ENABLE_ZLIB=OFF -DLLVM_ENABLE_ZSTD=OFF -DLLVM_ENABLE_TERMINFO=OFF -DLLVM_ENABLE_LIBXML2=OFF \
+            -DLLVM_TABLEGEN="$PWD/llvm-host-build/bin/llvm-tblgen"
+          ninja -C llvm-ios-build
+          ls -la llvm-ios-build/lib | head -80
+      - if: steps.cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: |
+            toolchains/llvm-ios-build/lib
+            toolchains/llvm-ios-build/include
+            toolchains/llvm-project/llvm/include
+          key: ${{ env.LLVM_CACHE_KEY }}
+
+  app:
+    needs: llvm-ios
+    runs-on: xcode-27
+    timeout-minutes: 340
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+          fetch-depth: 1
+      - name: Select newest Xcode
+        run: |
+          ls -d /Applications/Xcode*.app
+          XC=$(ls -d /Applications/Xcode_27*.app 2>/dev/null | sort -V | tail -1)
+          [ -n "$XC" ] && sudo xcode-select -s "$XC"
+          xcodebuild -version
+          xcrun --sdk iphoneos --show-sdk-version
+          xcodebuild -downloadComponent MetalToolchain || true
+          df -h .
+      - name: Host tools
+        run: |
+          brew install bison flex llvm ninja meson ccache gnutls freetype pkgconf autoconf automake libtool || true
+          rustup target add aarch64-apple-ios
+      - uses: actions/cache/restore@v4
+        with:
+          path: |
+            toolchains/llvm-ios-build/lib
+            toolchains/llvm-ios-build/include
+            toolchains/llvm-project/llvm/include
+          key: ${{ env.LLVM_CACHE_KEY }}
+          fail-on-cache-miss: true
+      - uses: actions/cache@v4
+        with:
+          path: toolchains/llvm-mingw-20260421-ucrt-macos-universal
+          key: llvm-mingw-20260421
+      - name: Build
+        run: bash ci/build.sh ${{ github.event.inputs.stages }}
+      - if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ci-logs
+          path: ci-logs
+      - if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: Madeira-fork-ipa
+          path: build/Madeira-fork.ipa
+          retention-days: 30

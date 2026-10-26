@@ -1,0 +1,117 @@
+#!/bin/bash
+# CI driver for the personal fork: builds every ignored input the Xcode
+# project links (docs/BUILDING.md), then the app (Debug), then an IPA.
+#
+# Each stage logs to $LOGS/<stage>.log. With KEEP_GOING=1 a failed stage is
+# recorded and the next one still runs, so one CI run reports as many
+# problems as possible; the final summary lists them.
+#
+# Usage: ci/build.sh [stage...]   (no arguments: all stages in order)
+set -uo pipefail
+
+R="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+LOGS="${LOGS:-$R/ci-logs}"
+KEEP_GOING="${KEEP_GOING:-1}"
+JOBS="$(sysctl -n hw.ncpu 2>/dev/null || echo 4)"
+MINGW_NAME=llvm-mingw-20260421-ucrt-macos-universal
+MINGW_SHA=bd85a3975723815cef28dbbd2ca2cb0c926f6b348a12a0453f39f7af273cb3f7
+mkdir -p "$LOGS" "$R/toolchains"
+export PATH="/opt/homebrew/opt/bison/bin:/opt/homebrew/opt/flex/bin:/opt/homebrew/opt/llvm/bin:$PATH"
+
+FAILED=()
+
+stage_mingw() {
+    local d="$R/toolchains/$MINGW_NAME"
+    [ -x "$d/bin/aarch64-w64-mingw32-clang" ] && return 0
+    local t="$R/toolchains/$MINGW_NAME.tar.xz"
+    curl -fsSL -o "$t" "https://github.com/mstorsjo/llvm-mingw/releases/download/20260421/$MINGW_NAME.tar.xz"
+    echo "$MINGW_SHA  $t" | shasum -a 256 -c -
+    tar -xJf "$t" -C "$R/toolchains"
+    rm -f "$t"
+}
+
+stage_freetype() {
+    [ -d "$R/research/freetype" ] || \
+        git clone --depth 1 --branch VER-2-13-3 https://github.com/freetype/freetype.git "$R/research/freetype"
+    bash "$R/build/freetype-ios/build.sh"
+}
+
+stage_gnutls() { bash "$R/build/gnutls-ios/build.sh"; }
+stage_ffmpeg() { bash "$R/build/ffmpeg/build.sh"; }
+
+# Wine's configured trees. build-macos supplies config.h and the widl-made
+# headers the iOS unix libraries compile against; build-arm64ec supplies the
+# PE-only generated headers (dwrite.h) that ntdll-unix names explicitly.
+stage_wine_trees() {
+    export PATH="$R/toolchains/$MINGW_NAME/bin:$PATH"
+    if [ ! -f "$R/wine/build-macos/config.status" ]; then
+        mkdir -p "$R/wine/build-macos"
+        (cd "$R/wine/build-macos" && ../configure --without-x --disable-tests --enable-winegstreamer) || return 1
+    fi
+    make -C "$R/wine/build-macos" -j"$JOBS" include || return 1
+    if [ ! -f "$R/wine/build-arm64ec/config.status" ]; then
+        mkdir -p "$R/wine/build-arm64ec"
+        (cd "$R/wine/build-arm64ec" && ../configure --enable-archs=arm64ec --without-x --disable-tests --enable-winegstreamer) || return 1
+    fi
+    make -C "$R/wine/build-arm64ec" -j"$JOBS" include
+}
+
+stage_ntdll() { bash "$R/build/ntdll-unix/build.sh"; }
+stage_win32u() { bash "$R/build/win32u-unix/build.sh"; }
+stage_wineserver() { bash "$R/ci/wineserver-base.sh" && bash "$R/build/wineserver/build.sh"; }
+stage_fex() { bash "$R/build/fex-ios/build.sh"; }
+
+stage_dxmt() {
+    bash "$R/build/dxmt-ios/build.sh" || return 1
+    xcrun -sdk iphoneos libtool -static -o "$R/build/dxmt-ios/libdxmt_combined.a" \
+        "$R/build/dxmt-ios/obj"/*.o "$R/toolchains/llvm-ios-build/lib"/*.a || return 1
+    cp "$R/build/dxmt-ios/libdxmt_combined.a" "$R/app/Madeira/libdxmt_combined.a"
+}
+
+stage_rppairing() { bash "$R/build/rppairing-ios/build.sh"; }
+
+stage_app() {
+    # The Microsoft runtime DLLs are never committed; the folder the project
+    # names stays empty here and the DLLs are added to the IPA afterwards.
+    mkdir -p "$R/app/Madeira/x86_64-vcruntime"
+    xcodebuild -project "$R/app/Madeira.xcodeproj" -scheme Madeira -configuration Debug \
+        -destination 'generic/platform=iOS' -derivedDataPath "$R/build/DerivedData" \
+        CODE_SIGN_IDENTITY=- CODE_SIGN_STYLE=Manual DEVELOPMENT_TEAM= PROVISIONING_PROFILE_SPECIFIER= \
+        AD_HOC_CODE_SIGNING_ALLOWED=YES CODE_SIGNING_REQUIRED=NO \
+        build
+}
+
+stage_ipa() {
+    local app="$R/build/DerivedData/Build/Products/Debug-iphoneos/Madeira.app"
+    [ -d "$app" ] || return 1
+    rm -rf "$R/build/ipa" && mkdir -p "$R/build/ipa/Payload"
+    cp -R "$app" "$R/build/ipa/Payload/"
+    (cd "$R/build/ipa" && zip -qry -X ../Madeira-fork.ipa Payload)
+    ls -la "$R/build/Madeira-fork.ipa"
+}
+
+ALL=(mingw freetype gnutls ffmpeg wine_trees ntdll win32u wineserver fex dxmt rppairing app ipa)
+STAGES=("$@")
+[ ${#STAGES[@]} -eq 0 ] && STAGES=("${ALL[@]}")
+
+for s in "${STAGES[@]}"; do
+    echo "::group::stage $s"
+    start=$(date +%s)
+    if "stage_$s" > >(tee "$LOGS/$s.log") 2>&1; then
+        echo "stage $s OK ($(( $(date +%s) - start ))s)"
+    else
+        echo "::error::stage $s FAILED ($(( $(date +%s) - start ))s)"
+        FAILED+=("$s")
+        # Compiler errors of the per-file build scripts land in obj/*.err.
+        for e in "$R"/build/*/obj/*.err; do
+            [ -s "$e" ] && { echo "--- $e"; head -40 "$e"; } >> "$LOGS/$s.errfiles.log"
+        done
+        echo "::endgroup::"
+        [ "$KEEP_GOING" = 1 ] || break
+        continue
+    fi
+    echo "::endgroup::"
+done
+
+echo "Failed stages: ${FAILED[*]:-none}"
+[ ${#FAILED[@]} -eq 0 ]
