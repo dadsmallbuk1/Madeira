@@ -42,24 +42,47 @@ stage_ffmpeg() { bash "$R/build/ffmpeg/build.sh"; }
 # Wine's configured trees. build-macos supplies config.h and the widl-made
 # headers the iOS unix libraries compile against; build-arm64ec supplies the
 # PE-only generated headers (dwrite.h) that ntdll-unix names explicitly.
+# Wine's single top-level Makefile has no "include" target (that name is the
+# directory), so the generated headers are asked for one by one: every
+# include/*.idl becomes include/<name>.h.
+wine_headers() {
+    local tree="$1" targets=()
+    for idl in "$R"/wine/include/*.idl "$R"/wine/include/wine/*.idl; do
+        [ -f "$idl" ] || continue
+        local rel="${idl#$R/wine/}"
+        targets+=("${rel%.idl}.h")
+    done
+    make -C "$tree" -j"$JOBS" -k "${targets[@]}" || true
+    [ -f "$tree/include/objidlbase.h" ] && [ -f "$tree/include/wtypes.h" ]
+}
+
 stage_wine_trees() {
     export PATH="$R/toolchains/$MINGW_NAME/bin:$PATH"
     if [ ! -f "$R/wine/build-macos/config.status" ]; then
         mkdir -p "$R/wine/build-macos"
         (cd "$R/wine/build-macos" && ../configure --without-x --disable-tests --enable-winegstreamer) || return 1
     fi
-    make -C "$R/wine/build-macos" -j"$JOBS" include || return 1
+    wine_headers "$R/wine/build-macos" || return 1
     if [ ! -f "$R/wine/build-arm64ec/config.status" ]; then
         mkdir -p "$R/wine/build-arm64ec"
         (cd "$R/wine/build-arm64ec" && ../configure --enable-archs=arm64ec --without-x --disable-tests --enable-winegstreamer) || return 1
     fi
-    make -C "$R/wine/build-arm64ec" -j"$JOBS" include
+    wine_headers "$R/wine/build-arm64ec"
 }
 
 stage_ntdll() { bash "$R/build/ntdll-unix/build.sh"; }
 stage_win32u() { bash "$R/build/win32u-unix/build.sh"; }
 stage_wineserver() { bash "$R/ci/wineserver-base.sh" && bash "$R/build/wineserver/build.sh"; }
-stage_fex() { bash "$R/build/fex-ios/build.sh"; }
+# fex-ios/build.sh configures only when there is no cache yet; configure it
+# here first with the same options plus the processor, which a CMake iOS
+# cross build leaves empty (FEX's CMakeLists stops on an empty one).
+stage_fex() {
+    local B="$R/FEX/build-ios"
+    if [ ! -f "$B/CMakeCache.txt" ]; then
+        cmake -S "$R/FEX" -B "$B" -DCMAKE_SYSTEM_NAME=iOS -DCMAKE_SYSTEM_PROCESSOR=arm64             -DCMAKE_OSX_ARCHITECTURES=arm64 -DCMAKE_OSX_SYSROOT=iphoneos -DCMAKE_OSX_DEPLOYMENT_TARGET=17.0             -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTING=OFF -DBUILD_THUNKS=OFF -DBUILD_FEXCONFIG=OFF             -DBUILD_FEX_LINUX_TESTS=OFF -DENABLE_FEX_ALLOCATOR=OFF -DENABLE_ASSERTIONS=OFF             -DENABLE_CLANG_THUNKS=ON -DENABLE_CCACHE=ON || return 1
+    fi
+    bash "$R/build/fex-ios/build.sh"
+}
 
 stage_dxmt() {
     bash "$R/build/dxmt-ios/build.sh" || return 1
