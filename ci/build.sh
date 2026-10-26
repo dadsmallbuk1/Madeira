@@ -96,7 +96,7 @@ stage_dxmt() {
     # atomic_fetch_add_explicit, which means the same on every compiler.
     for m in "$R"/dxmt/src/airconv/shaders/*.metal; do
         local n; n=$(basename "$m" .metal)
-        sed -E 's/__metal_atomic_fetch_add_explicit\(([a-z_]+), 1, int\(memory_order_relaxed\), __METAL_MEMORY_SCOPE_THREADGROUP__\)/atomic_fetch_add_explicit((threadgroup atomic_int *), 1, memory_order_relaxed)/'             "$m" > "$H/$n.metal"
+        sed -E 's/__metal_atomic_fetch_add_explicit\(([a-z_]+), 1, int\(memory_order_relaxed\), __METAL_MEMORY_SCOPE_THREADGROUP__\)/atomic_fetch_add_explicit((threadgroup atomic_int *)\1, 1, memory_order_relaxed)/'             "$m" > "$H/$n.metal"
         (cd "$H" && xcrun -sdk macosx metal -std=metal3.1 --target=air64-apple-macos14.0 -o "$n.air" -c "$n.metal" &&
             xxd -n "$n" -i "$n.air" "$n.h") || return 1
     done
