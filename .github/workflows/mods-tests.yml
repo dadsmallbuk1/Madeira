@@ -23,7 +23,7 @@ jobs:
       - uses: actions/checkout@v4
       - name: Select newest Xcode
         run: |
-          XC=$(ls -d /Applications/Xcode_27*.app 2>/dev/null | sort -V | tail -1)
+          XC=$(ls -d /Applications/Xcode_27*.app 2>/dev/null | grep -viE 'beta|release_candidate|rc' | sort -V | tail -1)
           [ -n "$XC" ] && sudo xcode-select -s "$XC"
           xcodebuild -version
       - run: brew install sevenzip || true

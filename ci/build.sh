@@ -116,6 +116,8 @@ stage_rppairing() { bash "$R/build/rppairing-ios/build.sh"; }
 stage_libarchive() { bash "$R/build/libarchive-ios/build.sh"; }
 
 stage_app() {
+    # The licence copies the bundle carries are generated (the build checks them).
+    bash "$R/build/stage-licenses.sh" || return 1
     # The Microsoft runtime DLLs are never committed; the folder the project
     # names stays empty here and the DLLs are added to the IPA afterwards.
     mkdir -p "$R/app/Madeira/x86_64-vcruntime"

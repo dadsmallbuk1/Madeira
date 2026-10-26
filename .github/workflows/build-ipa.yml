@@ -45,7 +45,7 @@ jobs:
         run: |
           set -eux
           brew install ninja || true
-          XC=$(ls -d /Applications/Xcode_27*.app 2>/dev/null | sort -V | tail -1); [ -n "$XC" ] && sudo xcode-select -s "$XC"
+          XC=$(ls -d /Applications/Xcode_27*.app 2>/dev/null | grep -viE 'beta|release_candidate|rc' | sort -V | tail -1); [ -n "$XC" ] && sudo xcode-select -s "$XC"
           xcodebuild -version
           mkdir -p toolchains && cd toolchains
           git clone --depth 1 --branch "$LLVM_TAG" https://github.com/llvm/llvm-project.git
@@ -86,7 +86,7 @@ jobs:
       - name: Select newest Xcode
         run: |
           ls -d /Applications/Xcode*.app
-          XC=$(ls -d /Applications/Xcode_27*.app 2>/dev/null | sort -V | tail -1)
+          XC=$(ls -d /Applications/Xcode_27*.app 2>/dev/null | grep -viE 'beta|release_candidate|rc' | sort -V | tail -1)
           [ -n "$XC" ] && sudo xcode-select -s "$XC"
           xcodebuild -version
           xcrun --sdk iphoneos --show-sdk-version
