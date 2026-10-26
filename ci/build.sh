@@ -168,7 +168,10 @@ stage_compare() {
 import sys, zipfile
 ref = {i.filename for i in zipfile.ZipFile(sys.argv[1]).infolist() if not i.is_dir()}
 new = {i.filename for i in zipfile.ZipFile(sys.argv[2]).infolist() if not i.is_dir()}
-missing = sorted(f for f in ref - new if "/x86_64-vcruntime/" not in f and "/_CodeSignature/" not in f)
+# The release also carries three 32-bit smoke-test programs (tests/x86) no game uses.
+tests = ("/hello-x86.exe", "/d3d9-cube-x86.exe", "/wma-x86.exe")
+missing = sorted(f for f in ref - new if "/x86_64-vcruntime/" not in f and "/_CodeSignature/" not in f
+                 and not f.endswith(tests))
 print(f"release files: {len(ref)}, fork files: {len(new)}, missing from the fork: {len(missing)}")
 for f in missing[:200]: print("  missing:", f)
 sys.exit(1 if missing else 0)
