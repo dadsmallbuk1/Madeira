@@ -75,11 +75,13 @@ stage_win32u() { bash "$R/build/win32u-unix/build.sh"; }
 stage_wineserver() { bash "$R/ci/wineserver-base.sh" && bash "$R/build/wineserver/build.sh"; }
 # fex-ios/build.sh configures only when there is no cache yet; configure it
 # here first with the same options plus the processor, which a CMake iOS
-# cross build leaves empty (FEX's CMakeLists stops on an empty one).
+# cross build leaves empty (FEX's CMakeLists stops on an empty one), and a
+# fixed CPU tuning: the default "native" reads /proc/cpuinfo, which macOS
+# lacks. apple-m1 (ARMv8.5) is a subset of every iPhone that runs Madeira.
 stage_fex() {
     local B="$R/FEX/build-ios"
     if [ ! -f "$B/CMakeCache.txt" ]; then
-        cmake -S "$R/FEX" -B "$B" -DCMAKE_SYSTEM_NAME=iOS -DCMAKE_SYSTEM_PROCESSOR=arm64             -DCMAKE_OSX_ARCHITECTURES=arm64 -DCMAKE_OSX_SYSROOT=iphoneos -DCMAKE_OSX_DEPLOYMENT_TARGET=17.0             -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTING=OFF -DBUILD_THUNKS=OFF -DBUILD_FEXCONFIG=OFF             -DBUILD_FEX_LINUX_TESTS=OFF -DENABLE_FEX_ALLOCATOR=OFF -DENABLE_ASSERTIONS=OFF             -DENABLE_CLANG_THUNKS=ON -DENABLE_CCACHE=ON || return 1
+        cmake -S "$R/FEX" -B "$B" -DCMAKE_SYSTEM_NAME=iOS -DCMAKE_SYSTEM_PROCESSOR=arm64             -DCMAKE_OSX_ARCHITECTURES=arm64 -DCMAKE_OSX_SYSROOT=iphoneos -DCMAKE_OSX_DEPLOYMENT_TARGET=17.0             -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTING=OFF -DBUILD_THUNKS=OFF -DBUILD_FEXCONFIG=OFF             -DBUILD_FEX_LINUX_TESTS=OFF -DENABLE_FEX_ALLOCATOR=OFF -DENABLE_ASSERTIONS=OFF             -DENABLE_CLANG_THUNKS=ON -DENABLE_CCACHE=ON -DTUNE_CPU=apple-m1 || return 1
     fi
     bash "$R/build/fex-ios/build.sh"
 }
@@ -89,9 +91,13 @@ stage_fex() {
 stage_dxmt() {
     local H="$R/build/dxmt-ios/shader-headers"
     mkdir -p "$H"
+    # Newer Metal compilers give the internal __metal_atomic_fetch_add_explicit
+    # one more parameter; the copy compiled here uses the public
+    # atomic_fetch_add_explicit, which means the same on every compiler.
     for m in "$R"/dxmt/src/airconv/shaders/*.metal; do
         local n; n=$(basename "$m" .metal)
-        (cd "$H" && xcrun -sdk macosx metal -std=metal3.1 --target=air64-apple-macos14.0 -o "$n.air" -c "$m" &&
+        sed -E 's/__metal_atomic_fetch_add_explicit\(([a-z_]+), 1, int\(memory_order_relaxed\), __METAL_MEMORY_SCOPE_THREADGROUP__\)/atomic_fetch_add_explicit((threadgroup atomic_int *), 1, memory_order_relaxed)/'             "$m" > "$H/$n.metal"
+        (cd "$H" && xcrun -sdk macosx metal -std=metal3.1 --target=air64-apple-macos14.0 -o "$n.air" -c "$n.metal" &&
             xxd -n "$n" -i "$n.air" "$n.h") || return 1
     done
     bash "$R/build/dxmt-ios/build.sh" || return 1
