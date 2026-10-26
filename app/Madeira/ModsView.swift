@@ -163,6 +163,50 @@ extension LibraryEntry {
 
     // MARK: Installing
 
+    nonisolated static let archiveExtensions: Set<String> = ["zip", "7z", "rar"]
+
+    /// A file the picker handed over (its own copy): checked, then installed.
+    func importPicked(_ url: URL) {
+        guard Self.archiveExtensions.contains(url.pathExtension.lowercased()) else {
+            error = "Choose a .zip, .7z or .rar file."
+            return
+        }
+        importArchive(url)
+    }
+
+    /// Mods dragged onto the list: each archive is copied out while the
+    /// provider's file still exists, then installed one after another.
+    func importDropped(_ providers: [NSItemProvider]) -> Bool {
+        let store = self.store
+        var accepted = false
+        for provider in providers where provider.hasItemConformingToTypeIdentifier(UTType.data.identifier) {
+            accepted = true
+            busy = "Copying a dropped file…"
+            provider.loadFileRepresentation(forTypeIdentifier: UTType.data.identifier) { url, error in
+                guard let url else {
+                    Task { @MainActor in self.busy = nil; self.error = "The dropped item could not be read: \(error?.localizedDescription ?? "unknown error")" }
+                    return
+                }
+                // The temporary file is gone once this returns: copy it now.
+                let name = provider.suggestedName.map { name -> String in
+                    (name as NSString).pathExtension.isEmpty ? name + "." + url.pathExtension : name
+                } ?? url.lastPathComponent
+                guard Self.archiveExtensions.contains((name as NSString).pathExtension.lowercased()) else {
+                    Task { @MainActor in self.busy = nil; self.error = "\(name) isn't a .zip, .7z or .rar file." }
+                    return
+                }
+                let target = Self.freeName(in: store.downloads, name)
+                do {
+                    try FileManager.default.copyItem(at: url, to: target)
+                    Task { @MainActor in self.install(archive: target.lastPathComponent) }
+                } catch {
+                    Task { @MainActor in self.busy = nil; self.error = "The dropped file could not be copied: \(error.localizedDescription)" }
+                }
+            }
+        }
+        return accepted
+    }
+
     /// Copy a picked archive into downloads/ and install it.
     func importArchive(_ picked: URL) {
         let store = self.store
@@ -172,7 +216,10 @@ extension LibraryEntry {
             defer { if scoped { picked.stopAccessingSecurityScopedResource() } }
             do {
                 let target = Self.freeName(in: store.downloads, picked.lastPathComponent)
-                try FileManager.default.copyItem(at: picked, to: target)
+                // The picker's copy can simply move; anything else is copied.
+                if (try? FileManager.default.moveItem(at: picked, to: target)) == nil {
+                    try FileManager.default.copyItem(at: picked, to: target)
+                }
                 await MainActor.run { self.install(archive: target.lastPathComponent) }
             } catch {
                 await MainActor.run { self.busy = nil; self.error = "The file could not be copied: \(error.localizedDescription)" }
@@ -369,12 +416,20 @@ struct ModsScreen: View {
                 }
             }
         }
-        .fileImporter(isPresented: $importing, allowedContentTypes: [.item]) { result in
-            if case .success(let url) = result {
-                let ext = url.pathExtension.lowercased()
-                if ["zip", "7z", "rar"].contains(ext) { manager.importArchive(url) }
-                else { manager.error = "Choose a .zip, .7z or .rar file." }
+        // UIKit's picker, not .fileImporter: Game details already has a
+        // .fileImporter (the cover image, images only) further up this
+        // navigation stack, and SwiftUI then presents that one's settings,
+        // which made every archive unselectable.
+        .sheet(isPresented: $importing) {
+            ModArchivePicker { url in
+                importing = false
+                if let url { manager.importPicked(url) }
             }
+            .ignoresSafeArea()
+        }
+        // Drag a mod in from Files or another app (Split View, Slide Over).
+        .onDrop(of: [UTType.data], isTargeted: nil) { providers in
+            manager.importDropped(providers)
         }
         .sheet(item: $manager.pending) { pending in
             FomodWizard(pending: pending, fileState: manager.fileState,
@@ -617,5 +672,29 @@ struct FomodWizard: View {
         path = path ?? session.config.moduleImage
         guard let path, !path.isEmpty else { return nil }
         return UIImage(contentsOfFile: CaseFolder().resolve(pending.root, path).path)
+    }
+}
+
+// MARK: - Picking an archive
+
+/// The system file picker for one mod archive. It hands over its own copy of
+/// the file (asCopy), so nothing needs security-scoped access afterwards.
+struct ModArchivePicker: UIViewControllerRepresentable {
+    let done: (URL?) -> Void
+
+    func makeUIViewController(context: Context) -> UIDocumentPickerViewController {
+        let picker = UIDocumentPickerViewController(forOpeningContentTypes: [.data], asCopy: true)
+        picker.allowsMultipleSelection = false
+        picker.delegate = context.coordinator
+        return picker
+    }
+    func updateUIViewController(_ controller: UIDocumentPickerViewController, context: Context) {}
+    func makeCoordinator() -> Coordinator { Coordinator(done: done) }
+
+    final class Coordinator: NSObject, UIDocumentPickerDelegate {
+        let done: (URL?) -> Void
+        init(done: @escaping (URL?) -> Void) { self.done = done }
+        func documentPicker(_ controller: UIDocumentPickerViewController, didPickDocumentsAt urls: [URL]) { done(urls.first) }
+        func documentPickerWasCancelled(_ controller: UIDocumentPickerViewController) { done(nil) }
     }
 }

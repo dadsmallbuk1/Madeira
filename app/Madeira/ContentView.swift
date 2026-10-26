@@ -1,4 +1,5 @@
 import SwiftUI
+import Combine
 import UIKit
 import QuartzCore
 import Metal
@@ -847,7 +848,7 @@ enum JoystickPadHost {
             w.windowLevel = .normal + 100
             w.backgroundColor = .clear
             w.isHidden = false                 // never becomes key: see PassthroughWindow
-            let host = UIHostingController(rootView: JoystickPadOverlay())
+            let host = GameOverlayHostingController(rootView: JoystickPadOverlay())
             host.view.backgroundColor = .clear
             host.view.isUserInteractionEnabled = false
             w.rootViewController = host
@@ -4043,6 +4044,59 @@ final class ControlsWindow: UIWindow {
     }
 }
 
+/// Whether the status bar and home indicator give way to the game. The overlay
+/// windows above the game (joystick pad, touch controls) are the frontmost
+/// full-screen windows, so iOS takes the status bar's visibility from their
+/// controllers, not from the app window's .statusBarHidden. On an iPhone in
+/// landscape iOS hides the bar anyway; on a large display (iPad, the iPhone
+/// Duo's inner screen) it stays unless these controllers ask otherwise. Same
+/// rule as the app window: hidden during a library session and in landscape.
+enum GameOverlayChrome {
+    static func hidden(in window: UIWindow?) -> Bool {
+        let library = LibraryModel.shared
+        if library.current != nil || library.preparing != nil { return true }
+        guard let bounds = window?.windowScene?.coordinateSpace.bounds ?? window?.bounds else { return false }
+        return bounds.width > bounds.height
+    }
+
+    /// Ask every overlay window to re-read it (a session started or ended, the
+    /// device turned or folded).
+    static func refresh() {
+        for scene in UIApplication.shared.connectedScenes.compactMap({ $0 as? UIWindowScene }) {
+            for window in scene.windows {
+                guard let host = window.rootViewController as? GameOverlayHosting else { continue }
+                host.refreshChrome()
+            }
+        }
+    }
+}
+
+protocol GameOverlayHosting: AnyObject { func refreshChrome() }
+
+final class GameOverlayHostingController<Content: View>: UIHostingController<Content>, GameOverlayHosting {
+    private var watch: Any?
+
+    override func viewDidLoad() {
+        super.viewDidLoad()
+        // Sessions start and end through LibraryModel; the next run loop sees the new value.
+        watch = LibraryModel.shared.objectWillChange.sink { [weak self] _ in
+            DispatchQueue.main.async { self?.refreshChrome() }
+        }
+    }
+    override func viewWillTransition(to size: CGSize, with coordinator: UIViewControllerTransitionCoordinator) {
+        super.viewWillTransition(to: size, with: coordinator)
+        coordinator.animate(alongsideTransition: nil) { [weak self] _ in self?.refreshChrome() }
+    }
+    override var prefersStatusBarHidden: Bool { GameOverlayChrome.hidden(in: view.window) }
+    override var prefersHomeIndicatorAutoHidden: Bool { GameOverlayChrome.hidden(in: view.window) }
+    override var preferredStatusBarUpdateAnimation: UIStatusBarAnimation { .fade }
+
+    func refreshChrome() {
+        setNeedsStatusBarAppearanceUpdate()
+        setNeedsUpdateOfHomeIndicatorAutoHidden()
+    }
+}
+
 enum TouchControlsHost {
     private static var window: ControlsWindow?
 
@@ -4061,12 +4115,13 @@ enum TouchControlsHost {
             w.windowLevel = .normal + 101
             w.backgroundColor = .clear
             w.isHidden = false        // deliberately never made key
-            let host = UIHostingController(rootView: TouchControlsOverlay())
+            let host = GameOverlayHostingController(rootView: TouchControlsOverlay())
             host.view.backgroundColor = .clear
             w.rootViewController = host
             window = w
         }
         window?.frame = scene.coordinateSpace.bounds
+        GameOverlayChrome.refresh()
         fputs("[controls] ml644 overlay attached frame=\(window?.frame ?? .zero) " +
               "controls=\(TouchControlsModel.shared.controls.count)\n", stderr)
     }
