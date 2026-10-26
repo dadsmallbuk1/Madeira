@@ -59,6 +59,7 @@ extension LibraryEntry {
         try? FileManager.default.removeItem(at: store.work)
         try? FileManager.default.createDirectory(at: store.work, withIntermediateDirectories: true)
         refreshPlugins()
+        refreshConflicts()
     }
 
     private func save() {
@@ -113,8 +114,16 @@ extension LibraryEntry {
             self.error = "plugins.txt could not be written: \(error.localizedDescription)"
         }
         missingMasters = ModPlugins.missingMasters(state.plugins, store: store)
-        conflicts = ModDeployer.conflicts(state, store: store)
         save()
+    }
+
+    /// Count conflicts off the main thread: it walks every enabled mod's files.
+    func refreshConflicts() {
+        let snapshot = state, store = self.store
+        Task.detached(priority: .utility) {
+            let conflicts = ModDeployer.conflicts(snapshot, store: store)
+            await MainActor.run { self.conflicts = conflicts }
+        }
     }
 
     func setEnabled(_ id: UUID, _ on: Bool) {
