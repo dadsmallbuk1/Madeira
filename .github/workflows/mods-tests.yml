@@ -1,0 +1,30 @@
+# The mod manager's host tests (ci/mods-tests.sh): the archive reader, the
+# FOMOD installer and deployment, compiled for and run on the build Mac.
+name: mods-tests
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [skyrim]
+    paths:
+      - "app/Madeira/ModManagerCore.swift"
+      - "app/Madeira/Fomod.swift"
+      - "app/Madeira/ModArchive.h"
+      - "build/libarchive-ios/**"
+      - "tests/mods/**"
+      - "ci/mods-tests.sh"
+      - ".github/workflows/mods-tests.yml"
+
+jobs:
+  test:
+    runs-on: xcode-27
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - name: Select newest Xcode
+        run: |
+          XC=$(ls -d /Applications/Xcode_27*.app 2>/dev/null | sort -V | tail -1)
+          [ -n "$XC" ] && sudo xcode-select -s "$XC"
+          xcodebuild -version
+      - run: brew install sevenzip || true
+      - run: bash ci/mods-tests.sh
