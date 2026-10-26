@@ -84,7 +84,16 @@ stage_fex() {
     bash "$R/build/fex-ios/build.sh"
 }
 
+# airconv includes headers made from its Metal shaders (src/airconv/meson.build:
+# metal -> .air -> xxd -i); dxmt-ios/build.sh expects them in shader-headers.
 stage_dxmt() {
+    local H="$R/build/dxmt-ios/shader-headers"
+    mkdir -p "$H"
+    for m in "$R"/dxmt/src/airconv/shaders/*.metal; do
+        local n; n=$(basename "$m" .metal)
+        (cd "$H" && xcrun -sdk macosx metal -std=metal3.1 --target=air64-apple-macos14.0 -o "$n.air" -c "$m" &&
+            xxd -n "$n" -i "$n.air" "$n.h") || return 1
+    done
     bash "$R/build/dxmt-ios/build.sh" || return 1
     xcrun -sdk iphoneos libtool -static -o "$R/build/dxmt-ios/libdxmt_combined.a" \
         "$R/build/dxmt-ios/obj"/*.o "$R/toolchains/llvm-ios-build/lib"/*.a || return 1
@@ -105,6 +114,7 @@ stage_app() {
 }
 
 stage_ipa() {
+    [[ " ${FAILED[*]:-} " == *" app "* ]] && { echo "app stage failed; no IPA"; return 1; }
     local app="$R/build/DerivedData/Build/Products/Debug-iphoneos/Madeira.app"
     [ -d "$app" ] || return 1
     rm -rf "$R/build/ipa" && mkdir -p "$R/build/ipa/Payload"
