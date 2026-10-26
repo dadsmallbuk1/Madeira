@@ -115,6 +115,26 @@ stage_dxmt() {
 stage_rppairing() { bash "$R/build/rppairing-ios/build.sh"; }
 stage_libarchive() { bash "$R/build/libarchive-ios/build.sh"; }
 
+# Madeira Dock (dockhost.exe + its notices), which starts Steam games. A build
+# output, so absent from a clean clone; without it Dock is hidden in the app.
+stage_dock() { bash "$R/build/madeira-dock/build.sh"; }
+
+# Wine's service programs: git-ignored in the aarch64 farm (.gitignore calls
+# them dormant) yet shipped in Madeira's releases. Built from build-macos's
+# aarch64 PE side and stripped like every shipped builtin.
+stage_wine_services() {
+    export PATH="$R/toolchains/$MINGW_NAME/bin:$PATH"
+    local B="$R/wine/build-macos" targets=()
+    for p in plugplay svchost winedevice; do targets+=("programs/$p/aarch64-windows/$p.exe"); done
+    make -C "$B" -j"$JOBS" "${targets[@]}" || return 1
+    for p in plugplay svchost winedevice; do
+        aarch64-w64-mingw32-strip --strip-debug -o "$R/app/Madeira/aarch64-windows/$p.exe"             "$B/programs/$p/aarch64-windows/$p.exe" || return 1
+    done
+}
+
+# The 32-bit (WoW64) farm, app/Madeira/i386-windows (docs/WOW64.md).
+stage_wine_i386() { bash "$R/build/wine-i386/build.sh"; }
+
 stage_app() {
     # The licence copies the bundle carries are generated (the build checks them).
     bash "$R/build/stage-licenses.sh" || return 1
@@ -138,7 +158,25 @@ stage_ipa() {
     ls -la "$R/build/Madeira-fork.ipa"
 }
 
-ALL=(mingw freetype gnutls ffmpeg wine_trees ntdll win32u wineserver fex dxmt rppairing libarchive app ipa)
+# Every file Madeira's own release IPA carries that this one lacks (the
+# Microsoft runtime DLLs excepted: they are added locally). A non-empty list
+# fails the stage, so nothing the app needs goes missing unnoticed.
+stage_compare() {
+    local ref="$R/build/Madeira-release.ipa"
+    [ -f "$ref" ] || curl -fsSL -o "$ref" https://github.com/willfaust/Madeira/releases/download/v0.1.3/Madeira-0.1.3.ipa
+    python3 - "$ref" "$R/build/Madeira-fork.ipa" <<'PY'
+import sys, zipfile
+ref = {i.filename for i in zipfile.ZipFile(sys.argv[1]).infolist() if not i.is_dir()}
+new = {i.filename for i in zipfile.ZipFile(sys.argv[2]).infolist() if not i.is_dir()}
+missing = sorted(f for f in ref - new if "/x86_64-vcruntime/" not in f and "/_CodeSignature/" not in f)
+print(f"release files: {len(ref)}, fork files: {len(new)}, missing from the fork: {len(missing)}")
+for f in missing[:200]: print("  missing:", f)
+sys.exit(1 if missing else 0)
+PY
+}
+
+ALL=(mingw freetype gnutls ffmpeg wine_trees ntdll win32u wineserver fex dxmt rppairing libarchive dock
+     wine_services wine_i386 app ipa compare)
 STAGES=("$@")
 [ ${#STAGES[@]} -eq 0 ] && STAGES=("${ALL[@]}")
 

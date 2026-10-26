@@ -115,9 +115,12 @@ jobs:
         with:
           name: ci-logs
           path: ci-logs
-      - if: success()
+      # Uploaded whenever it was made: a failing comparison should still leave
+      # the IPA to inspect.
+      - if: always()
         uses: actions/upload-artifact@v4
         with:
           name: Madeira-fork-ipa
           path: build/Madeira-fork.ipa
+          if-no-files-found: ignore
           retention-days: 30
