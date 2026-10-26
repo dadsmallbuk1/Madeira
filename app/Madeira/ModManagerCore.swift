@@ -139,6 +139,7 @@ enum ModFiles {
         try fm.createDirectory(at: target, withIntermediateDirectories: true)
         for name in try fm.contentsOfDirectory(atPath: source.path) {
             let from = source.appendingPathComponent(name)
+            if junk(name) { try? fm.removeItem(at: from); continue }
             var isDir: ObjCBool = false
             fm.fileExists(atPath: from.path, isDirectory: &isDir)
             if let existing = caseFolder.existing(target, name) {
@@ -355,6 +356,8 @@ enum ModLayout {
     static func install(_ unpacked: URL, into target: URL) throws {
         let content = contentRoot(unpacked)
         let caseFolder = CaseFolder()
+        // A "fomod" folder without an installer script (just info.xml) isn't content.
+        if let fomod = caseFolder.existing(content, "fomod") { try? FileManager.default.removeItem(at: fomod) }
         switch kind(content) {
         case .data:
             try ModFiles.merge(content, into: target.appendingPathComponent("Data"), caseFolder: caseFolder)
