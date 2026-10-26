@@ -13,6 +13,8 @@
 #import "MadeiraRPPairing.h"
 // madeira-bcd: the bundled prefix template, read by the Dock's Reset (DockReset.swift).
 #include "PrefixExtractor.h"
+// The mod manager's archive reader (build/libarchive-ios, ModManagerCore.swift).
+#import "ModArchive.h"
 
 // Wine file-based logging (server_ios.c)
 void wine_log_set_file(const char *path);

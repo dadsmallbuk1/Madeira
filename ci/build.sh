@@ -113,6 +113,7 @@ stage_dxmt() {
 }
 
 stage_rppairing() { bash "$R/build/rppairing-ios/build.sh"; }
+stage_libarchive() { bash "$R/build/libarchive-ios/build.sh"; }
 
 stage_app() {
     # The Microsoft runtime DLLs are never committed; the folder the project
@@ -135,7 +136,7 @@ stage_ipa() {
     ls -la "$R/build/Madeira-fork.ipa"
 }
 
-ALL=(mingw freetype gnutls ffmpeg wine_trees ntdll win32u wineserver fex dxmt rppairing app ipa)
+ALL=(mingw freetype gnutls ffmpeg wine_trees ntdll win32u wineserver fex dxmt rppairing libarchive app ipa)
 STAGES=("$@")
 [ ${#STAGES[@]} -eq 0 ] && STAGES=("${ALL[@]}")
 

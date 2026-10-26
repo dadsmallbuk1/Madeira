@@ -3325,7 +3325,7 @@ struct LibraryDetail: View {
     }
     /// The pages the details page links to (iOS Settings style), each with its own Form.
     enum Page: Hashable {
-        case display, controls, launch, compatibility, steam, cloud, library, advanced
+        case display, controls, launch, compatibility, steam, cloud, mods, library, advanced
         var title: String {
             switch self {
             case .display: return "Display"
@@ -3334,6 +3334,7 @@ struct LibraryDetail: View {
             case .compatibility: return "Compatibility"
             case .steam: return "Steam"
             case .cloud: return "Steam Cloud"
+            case .mods: return "Mods"
             case .library: return "Library details"
             case .advanced: return "Advanced"
             }
@@ -3346,6 +3347,7 @@ struct LibraryDetail: View {
             case .compatibility: return "cpu"
             case .steam: return "shippingbox"
             case .cloud: return "icloud"
+            case .mods: return "puzzlepiece.extension"
             case .library: return "info.circle"
             case .advanced: return "wrench.and.screwdriver"
             }
@@ -3359,7 +3361,9 @@ struct LibraryDetail: View {
         let steam: [Page] = entry.steamAppID == nil ? [] : (SteamOwnedLibrary.cloudEnabled ? [.steam, .cloud] : [.steam])
         let tuning: [Page] = launch ? [.display, .controls, .launch, .compatibility] : [.display, .controls, .compatibility]
         let more: [Page] = entry.desktop == true ? [.advanced] : [.library, .advanced]
-        return [tuning, steam, more].filter { !$0.isEmpty }
+        // The mod manager (ModsView.swift), for the games it supports.
+        let mods: [Page] = entry.modGame == nil ? [] : [.mods]
+        return [tuning, steam, mods, more].filter { !$0.isEmpty }
     }
     /// The value a page's row shows, when one setting sums it up.
     private func summary(_ page: Page) -> String? {
@@ -3374,6 +3378,19 @@ struct LibraryDetail: View {
     }
 
     @ViewBuilder private func page(_ page: Page) -> some View {
+        if page == .mods {
+            // Its own list (reordering, a picker), not a Form.
+            if let game = entry.modGame, let root = entry.modGameRoot {
+                ModsScreen(game: game, gameRoot: root).navigationTitle(page.title).navigationBarTitleDisplayMode(.inline)
+            } else {
+                Text("The game's folder could not be found.").foregroundStyle(.secondary)
+            }
+        } else {
+            formPage(page)
+        }
+    }
+
+    @ViewBuilder private func formPage(_ page: Page) -> some View {
         Form {
             switch page {
             case .display: displayPage
@@ -3382,6 +3399,7 @@ struct LibraryDetail: View {
             case .compatibility: compatibilityPage
             case .steam: steamPage
             case .cloud: if let appID = entry.steamAppID { SteamCloudSection(appID: appID) }
+            case .mods: EmptyView()
             case .library: libraryPage
             case .advanced: advancedPage
             }

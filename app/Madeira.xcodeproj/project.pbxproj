@@ -127,6 +127,9 @@
 		A10000F1 /* legal in Resources */ = {isa = PBXBuildFile; fileRef = A20000F1 /* legal */; };
 		A1000200 /* LogPattern.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000200 /* LogPattern.swift */; };
 		A1000201 /* LogTail.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000201 /* LogTail.swift */; };
+		A1000C01 /* ModManagerCore.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000C01 /* ModManagerCore.swift */; };
+		A1000C02 /* Fomod.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000C02 /* Fomod.swift */; };
+		A1000C03 /* ModsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000C03 /* ModsView.swift */; };
 		A1000202 /* FPSOverlay.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000202 /* FPSOverlay.swift */; };
 		A1000213 /* LibraryBCD.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000213 /* LibraryBCD.swift */; };
 		A1000914 /* LibraryPrefs.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000914 /* LibraryPrefs.swift */; };
@@ -333,6 +336,10 @@
 		A20000F1 /* legal */ = {isa = PBXFileReference; lastKnownFileType = folder; path = legal; sourceTree = "<group>"; };
 		A2000200 /* LogPattern.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LogPattern.swift; sourceTree = "<group>"; };
 		A2000201 /* LogTail.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LogTail.swift; sourceTree = "<group>"; };
+		A2000C01 /* ModManagerCore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ModManagerCore.swift; sourceTree = "<group>"; };
+		A2000C02 /* Fomod.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Fomod.swift; sourceTree = "<group>"; };
+		A2000C03 /* ModsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ModsView.swift; sourceTree = "<group>"; };
+		A2000C04 /* ModArchive.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = ModArchive.h; sourceTree = "<group>"; };
 		A2000202 /* FPSOverlay.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FPSOverlay.swift; sourceTree = "<group>"; };
 		A2000213 /* LibraryBCD.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LibraryBCD.swift; sourceTree = "<group>"; };
 		A2000914 /* LibraryPrefs.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LibraryPrefs.swift; sourceTree = "<group>"; };
@@ -499,6 +506,10 @@
 				A2000077 /* MadeiraConfig.swift */,
 				A2000200 /* LogPattern.swift */,
 				A2000201 /* LogTail.swift */,
+				A2000C01 /* ModManagerCore.swift */,
+				A2000C02 /* Fomod.swift */,
+				A2000C03 /* ModsView.swift */,
+				A2000C04 /* ModArchive.h */,
 				A2000202 /* FPSOverlay.swift */,
 				A2000213 /* LibraryBCD.swift */,
 				A2000914 /* LibraryPrefs.swift */,
@@ -846,6 +857,9 @@
 				A1000077 /* MadeiraConfig.swift in Sources */,
 				A1000200 /* LogPattern.swift in Sources */,
 				A1000201 /* LogTail.swift in Sources */,
+				A1000C01 /* ModManagerCore.swift in Sources */,
+				A1000C02 /* Fomod.swift in Sources */,
+				A1000C03 /* ModsView.swift in Sources */,
 				A1000202 /* FPSOverlay.swift in Sources */,
 				A1000213 /* LibraryBCD.swift in Sources */,
 				A1000914 /* LibraryPrefs.swift in Sources */,
@@ -1013,6 +1027,13 @@
 					"$(SRCROOT)/Madeira",
 				);
 				MARKETING_VERSION = 0.1.3;
+				OTHER_LDFLAGS = (
+					"$(inherited)",
+					"-lmadeira_archive",
+					"-lbz2",
+					"-liconv",
+					"-lz",
+				);
 				PRODUCT_BUNDLE_IDENTIFIER = "$(MADEIRA_BUNDLE_IDENTIFIER)";
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				PROVISIONING_PROFILE_SPECIFIER = "";
@@ -1064,6 +1085,13 @@
 					"$(SRCROOT)/Madeira",
 				);
 				MARKETING_VERSION = 0.1.3;
+				OTHER_LDFLAGS = (
+					"$(inherited)",
+					"-lmadeira_archive",
+					"-lbz2",
+					"-liconv",
+					"-lz",
+				);
 				PRODUCT_BUNDLE_IDENTIFIER = "$(MADEIRA_BUNDLE_IDENTIFIER)";
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";

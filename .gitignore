@@ -169,3 +169,8 @@ app/Madeira/arm64ec-windows/dock-notices.txt
 
 # faultrep.dll: build/faultrep/build.sh (its install goes into the tracked farm)
 build/faultrep/out/
+
+# Mod manager archive reader (build/libarchive-ios/build.sh)
+app/Madeira/libmadeira_archive.a
+build/libarchive-ios/obj-*/
+build/libarchive-ios/src/
