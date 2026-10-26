@@ -83,7 +83,13 @@ stage_fex() {
     if [ ! -f "$B/CMakeCache.txt" ]; then
         cmake -S "$R/FEX" -B "$B" -DCMAKE_SYSTEM_NAME=iOS -DCMAKE_SYSTEM_PROCESSOR=arm64             -DCMAKE_OSX_ARCHITECTURES=arm64 -DCMAKE_OSX_SYSROOT=iphoneos -DCMAKE_OSX_DEPLOYMENT_TARGET=17.0             -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTING=OFF -DBUILD_THUNKS=OFF -DBUILD_FEXCONFIG=OFF             -DBUILD_FEX_LINUX_TESTS=OFF -DENABLE_FEX_ALLOCATOR=OFF -DENABLE_ASSERTIONS=OFF             -DENABLE_CLANG_THUNKS=ON -DENABLE_CCACHE=ON -DTUNE_CPU=apple-m1 || return 1
     fi
-    bash "$R/build/fex-ios/build.sh"
+    bash "$R/build/fex-ios/build.sh" || return 1
+    # The app also links libJemallocLibs.a (FEXCore's allocator hooks), which
+    # fex-ios/build.sh does not build.
+    cmake --build "$B" --target JemallocLibs || return 1
+    for a in FEXCore/Source/libFEXCore.a FEXCore/Source/libFEXCore_Base.a FEXCore/Source/libJemallocLibs.a              External/SoftFloat-3e/libsoftfloat_3e.a External/cephes/libcephes_128bit.a External/fmt/libfmt.a              External/xxhash/cmake_unofficial/libxxhash.a; do
+        [ -f "$B/$a" ] || { echo "missing $B/$a"; return 1; }
+    done
 }
 
 # airconv includes headers made from its Metal shaders (src/airconv/meson.build:
