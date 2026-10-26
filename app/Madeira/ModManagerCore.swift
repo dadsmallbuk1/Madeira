@@ -574,12 +574,13 @@ struct PluginHeader: Equatable, Sendable {
 }
 
 private extension Data {
+    /// A little-endian integer at `offset` (bytes from the start).
     func loadLE<T: FixedWidthInteger>(_ offset: Int) -> T {
         var value: T = 0
-        withUnsafeMutableBytes(of: &value) { dest in
-            for k in 0..<MemoryLayout<T>.size { dest[k] = self[self.startIndex + offset + k] }
+        for k in 0..<MemoryLayout<T>.size {
+            value |= T(truncatingIfNeeded: self[self.startIndex + offset + k]) << (8 * k)
         }
-        return T(littleEndian: value)
+        return value
     }
 }
 
