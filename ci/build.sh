@@ -117,7 +117,19 @@ stage_libarchive() { bash "$R/build/libarchive-ios/build.sh"; }
 
 # Madeira Dock (dockhost.exe + its notices), which starts Steam games. A build
 # output, so absent from a clean clone; without it Dock is hidden in the app.
-stage_dock() { bash "$R/build/madeira-dock/build.sh"; }
+#
+# The app already knows MADEIRA_DOCK_GAME_SCM and MADEIRA_DOCK_KEEP_ALIVE
+# (willfaust/Madeira#315), but their host half, willfaust/madeira-dock#5, was
+# closed unmerged, so the pinned Dock has neither. Apply it here. Just Cause 2
+# needs the keep-alive: Valve's client stops reporting the game as running
+# seconds after it starts, and Dock then shut the client down under it.
+stage_dock() {
+    local patch="$R/ci/patches/madeira-dock-game-scm-keep-alive.patch"
+    if ! git -C "$R/madeira-dock" apply --reverse --check "$patch" 2>/dev/null; then
+        git -C "$R/madeira-dock" apply "$patch"
+    fi
+    bash "$R/build/madeira-dock/build.sh"
+}
 
 # Wine's service programs: git-ignored in the aarch64 farm (.gitignore calls
 # them dormant) yet shipped in Madeira's releases. Built from build-macos's
