@@ -4050,11 +4050,16 @@ final class ControlsWindow: UIWindow {
 /// controllers, not from the app window's .statusBarHidden. On an iPhone in
 /// landscape iOS hides the bar anyway; on a large display (iPad, the iPhone
 /// Duo's inner screen) it stays unless these controllers ask otherwise. Same
-/// rule as the app window: hidden during a library session and in landscape.
+/// rule as the app window: hidden during a library session, and in the
+/// developer interface's landscape. The library itself keeps its bar in
+/// landscape: answering "hidden" there disagreed with the app window, and on
+/// the Duo's inner screen (bar and toolbar share the right-hand rail) the rail
+/// was laid out again under the finger, so its buttons never fired.
 enum GameOverlayChrome {
     static func hidden(in window: UIWindow?) -> Bool {
         let library = LibraryModel.shared
         if library.current != nil || library.preparing != nil { return true }
+        if library.enabled { return false }
         guard let bounds = window?.windowScene?.coordinateSpace.bounds ?? window?.bounds else { return false }
         return bounds.width > bounds.height
     }
@@ -4075,6 +4080,10 @@ protocol GameOverlayHosting: AnyObject { func refreshChrome() }
 
 final class GameOverlayHostingController<Content: View>: UIHostingController<Content>, GameOverlayHosting {
     private var watch: Any?
+    /// The answer iOS last read; nil before the first. LibraryModel changes far
+    /// more often than sessions start or end, and only a different answer asks
+    /// iOS to look again.
+    private var shown: Bool?
 
     override func viewDidLoad() {
         super.viewDidLoad()
@@ -4092,6 +4101,9 @@ final class GameOverlayHostingController<Content: View>: UIHostingController<Con
     override var preferredStatusBarUpdateAnimation: UIStatusBarAnimation { .fade }
 
     func refreshChrome() {
+        let hidden = GameOverlayChrome.hidden(in: view.window)
+        guard shown != !hidden else { return }
+        shown = !hidden
         setNeedsStatusBarAppearanceUpdate()
         setNeedsUpdateOfHomeIndicatorAutoHidden()
     }
