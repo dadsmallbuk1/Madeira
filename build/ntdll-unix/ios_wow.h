@@ -90,6 +90,11 @@ extern void ios_wow_translate_limits( ULONG_PTR *limit_low, ULONG_PTR *limit_hig
 /* TRUE when `addr` lies inside the calling process's window. */
 extern int ios_wow_in_window( const void *addr );
 
+/* TRUE when `addr` lies inside ANY 32-bit pseudo-process's window, whichever
+ * thread asks.  Memory there belongs to a 32-bit process, so a structure that
+ * lives there is in that process's 32-bit layout. */
+extern int ios_wow_in_any_window( const void *addr );
+
 /* Guest view of a host address for the calling process: host - B, or the
  * address truncated unchanged when the caller has no window.  NULL stays 0. */
 extern ULONG ios_wow_guest_addr( const void *host );

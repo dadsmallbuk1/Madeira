@@ -3046,6 +3046,59 @@ static NTSTATUS invoke_user_apc( CONTEXT *context, const struct user_apc *apc, N
 }
 
 
+/* The I/O status block of a finished async, in the layout of the process that
+ * owns it.  set_async_iosb() picks the layout from the CALLING thread
+ * (in_wow64_call), but every pseudo-process lives in one task and the thread
+ * that completes an async is not always one of the issuing 32-bit process's:
+ * in a Madeira Dock session a 32-bit RPC client (Steam's SteamService.exe)
+ * then got its pipe reply recorded in the 64-bit layout, read Information as
+ * 0 ("Short read of header, 0 bytes") and failed with RPC_S_CALL_FAILED.  A
+ * 32-bit process's status block lives in its guest window and nothing else
+ * does, so the address decides.  env MADEIRA_IOSB_BY_ADDRESS=0: the calling
+ * thread decides, as before.  The first disagreements are logged. */
+static void ios_set_async_iosb( client_ptr_t iosb, NTSTATUS status, ULONG_PTR info )
+{
+    static int by_address = -1;
+    static int logged;
+    void *io = wine_server_get_ptr( iosb );
+    BOOL wow_thread, wow_block;
+
+    if (!iosb) return;
+    if (by_address < 0)
+    {
+        const char *env = getenv( "MADEIRA_IOSB_BY_ADDRESS" );
+        by_address = !(env && env[0] == '0');
+    }
+    wow_thread = in_wow64_call();
+    wow_block = ios_wow_in_any_window( io );
+    if (wow_thread != wow_block && logged < 40)
+    {
+        logged++;
+        fprintf( stderr, "[iosb-owner] tid=%04x iosb=%p thread=%s block=%s status=%08x info=%lu -> %s layout\n",
+                 (unsigned)HandleToULong( NtCurrentTeb()->ClientId.UniqueThread ), io, wow_thread ? "wow" : "64", wow_block ? "wow" : "64",
+                 (unsigned)status, (unsigned long)info,
+                 (by_address ? wow_block : wow_thread) ? "32-bit" : "64-bit" );
+    }
+    if (!by_address)
+    {
+        set_async_iosb( iosb, status, info );
+        return;
+    }
+    if (wow_block)
+    {
+        IO_STATUS_BLOCK32 *io32 = io;
+        io32->Information = info;
+        WriteRelease( &io32->Status, status );
+    }
+    else
+    {
+        IO_STATUS_BLOCK *io64 = io;
+        io64->Information = info;
+        WriteRelease( &io64->Status, status );
+    }
+}
+
+
 /***********************************************************************
  *              invoke_system_apc
  */
@@ -3073,7 +3126,7 @@ static void invoke_system_apc( const union apc_call *call, union apc_result *res
             result->async_io.status = status;
             result->async_io.total = info;
             /* the server will pass us NULL if a call failed synchronously */
-            set_async_iosb( call->async_io.sb, result->async_io.status, info );
+            ios_set_async_iosb( call->async_io.sb, result->async_io.status, info );
         }
         else result->async_io.status = STATUS_PENDING; /* restart it */
         break;
