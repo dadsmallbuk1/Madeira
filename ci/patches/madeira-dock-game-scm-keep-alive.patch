@@ -1,0 +1,181 @@
+From 25f7e8b4963d9e7ce0ea70f83511f4594c4d152b Mon Sep 17 00:00:00 2001
+From: Claude <noreply@anthropic.com>
+Date: Mon, 12 Oct 2026 13:58:04 +0000
+Subject: [PATCH 1/2] Launch: start Wine's service manager for the game session
+ on request
+
+Some games' own launchers install and start a Windows service of their
+own. A Dock game session runs no service manager (Dock starts services.exe
+only for the one-time-install batch's --start-services and for CEG), so
+every such start fails with RPC error 1722.
+
+With MADEIRA_DOCK_GAME_SCM=1, sh_launch() calls sh_install_scm_start(), the
+--start-services start, after the install folder check and before CEG
+preparation, the ActiveProcess values and LaunchApp. It runs on a worker
+thread that is waited for at most 20 s (SH_GAME_SCM_STEP_MS), like the
+batch's bound, and reports game-scm=<2 started|1 already|0 off|-1 failed>
+or game-scm-timeout=1. A manager it starts is left running and ends with
+the session. Off by default; MADEIRA_DOCK_INSTALL_SCM=0 turns it off too
+(game-scm=0). Dock itself still creates, registers and starts no service.
+
+Device evidence from Madeira's madeira-bcd fork (iPhone 17 Pro Max): on
+build 359 the launcher's service starts all failed (Valve's client service
+log: BOpenSCMgr failed, GLE 1722); on build 360, with this change,
+game-scm=2, services.exe ran in the game session and the service started.
+Madeira's settings for App IDs 3240220 and 1174180 have used it since, the
+fork's CI has built dockhost.exe with it from build 360 on, and every
+session of both titles logged on builds 514-515 (2026-10-12) reports
+game-scm=2. Madeira's report allow-list needs game-scm and game-scm-timeout
+(companion change in Madeira). README.md and docs/HANDOFF.md describe it.
+
+Checked here: tools/check.sh passes and tools/check-privacy.py is clean.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_0189oLHghpaYKLk4f786a6bc
+Signed-off-by: bahacan16 <190844990+bahacan16@users.noreply.github.com>
+---
+ src/launch.c | 20 ++++++++++++++++++++
+ 1 file changed, 20 insertions(+)
+
+diff --git a/src/launch.c b/src/launch.c
+index 425f6dc..f1c1498 100644
+--- a/src/launch.c
++++ b/src/launch.c
+@@ -166,6 +166,16 @@ static int prepare_custom_binaries(HMODULE module, void *client_user,
+     return 49;
+ }
+ 
++/* madeira-bcd: see tools/patch-dock-game-scm.py. */
++#define SH_GAME_SCM_STEP_MS 20000
++static volatile int32_t game_scm_outcome;
++
++static DWORD WINAPI game_scm_worker(void *observer)
++{
++    game_scm_outcome = sh_install_scm_start((const struct sh_observer *)observer);
++    return 0;
++}
++
+ int sh_launch(HMODULE module, void *engine, void *client_user,
+               const struct sh_api *api, const struct sh_observer *o,
+               int32_t pipe, int32_t user, uint64_t steamid, uint32_t appid,
+@@ -201,6 +211,16 @@ int sh_launch(HMODULE module, void *engine, void *client_user,
+         return 41;
+     }
+     o->event("launch-install-directory-verified", 1);
++    /* madeira-bcd: MADEIRA_DOCK_GAME_SCM=1, see tools/patch-dock-game-scm.py. */
++    if (wide_flag(L"MADEIRA_DOCK_GAME_SCM", L'1')) {
++        HANDLE worker = CreateThread(NULL, 0, game_scm_worker, (void *)o, 0, NULL);
++        if (!worker) o->event("game-scm", sh_install_scm_start(o));
++        else {
++            if (WaitForSingleObject(worker, SH_GAME_SCM_STEP_MS) == WAIT_OBJECT_0) o->event("game-scm", game_scm_outcome);
++            else o->event("game-scm-timeout", 1);
++            CloseHandle(worker);
++        }
++    }
+     HKEY active = NULL, machine = NULL;
+     int result = 42;
+     struct saved_value values[3] = {0};
+-- 
+2.50.0.windows.1
+
+
+From e54703b7b9f2b0274cd2e643e491f14c0184dd64 Mon Sep 17 00:00:00 2001
+From: Claude <noreply@anthropic.com>
+Date: Mon, 12 Oct 2026 14:00:15 +0000
+Subject: [PATCH 2/2] Launch: hold the session while named helper processes
+ still run
+
+Dock ends a game session 3 s after Valve's client stops reporting the app
+as running. Some games start through a small program that only waits for
+the publisher's launcher. When that launcher restarted itself after a
+self-update, the program exited with code 0, Valve's client reported the
+game ended, and Dock shut the client down while the new launcher was still
+starting; the game itself needs the client later.
+
+With MADEIRA_DOCK_KEEP_ALIVE=<exe>;<exe>;... the end is postponed while any
+process with one of those image names exists (CreateToolhelp32Snapshot,
+names compared without case), checked once per 3 s window after the client
+reports the app stopped; the session ends as before 3 s after the last one
+is gone. The report gets launch-keep-alive=1 the first time it holds the
+session. A list of 1024 characters or more is ignored. Off by default; with
+the variable unset nothing changes.
+
+Device evidence from Madeira's madeira-bcd fork (iPhone 17 Pro Max): the
+build 369 session above (log 2026-10-03 23:21) ended this way. Madeira's
+settings for App IDs 3240220 and 1174180 have set it since build 370, and
+the fork's CI has built dockhost.exe with it since. No logged session has
+needed it yet: none of the sessions of both titles on builds 514-515
+(2026-10-12) reports launch-keep-alive. Madeira's report allow-list needs
+the new field (companion change in Madeira). README.md and docs/HANDOFF.md
+describe it.
+
+Checked here: tools/check.sh passes and tools/check-privacy.py is clean.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_0189oLHghpaYKLk4f786a6bc
+Signed-off-by: bahacan16 <190844990+bahacan16@users.noreply.github.com>
+---
+ src/launch.c | 33 +++++++++++++++++++++++++++++++++
+ 1 file changed, 33 insertions(+)
+
+diff --git a/src/launch.c b/src/launch.c
+index f1c1498..bdf20c7 100644
+--- a/src/launch.c
++++ b/src/launch.c
+@@ -10,6 +10,7 @@
+ #include <stdio.h>
+ #include <string.h>
+ #include <wchar.h>
++#include <tlhelp32.h>
+ 
+ /* ml1970: an interrupted or stalled client update eventually fails closed. */
+ #define SH_CONTENT_WAIT_MS (6ULL * 60 * 60 * 1000)
+@@ -176,6 +177,31 @@ static DWORD WINAPI game_scm_worker(void *observer)
+     return 0;
+ }
+ 
++/* madeira-bcd: MADEIRA_DOCK_KEEP_ALIVE, see tools/patch-dock-keep-alive.py. */
++static bool keep_alive_running(void)
++{
++    static wchar_t list[1024];
++    DWORD n = GetEnvironmentVariableW(L"MADEIRA_DOCK_KEEP_ALIVE", list, 1024);
++    if (!n || n >= 1024) return false;
++    HANDLE snap = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
++    if (snap == INVALID_HANDLE_VALUE) return false;
++    PROCESSENTRY32W entry;
++    memset(&entry, 0, sizeof(entry));
++    entry.dwSize = sizeof(entry);
++    bool found = false;
++    for (BOOL ok = Process32FirstW(snap, &entry); ok && !found; ok = Process32NextW(snap, &entry)) {
++        const wchar_t *p = list;
++        while (*p && !found) {
++            const wchar_t *end = wcschr(p, L';');
++            size_t len = end ? (size_t)(end - p) : wcslen(p);
++            if (len && wcslen(entry.szExeFile) == len && !_wcsnicmp(entry.szExeFile, p, len)) found = true;
++            p += len + (end ? 1 : 0);
++        }
++    }
++    CloseHandle(snap);
++    return found;
++}
++
+ int sh_launch(HMODULE module, void *engine, void *client_user,
+               const struct sh_api *api, const struct sh_observer *o,
+               int32_t pipe, int32_t user, uint64_t steamid, uint32_t appid,
+@@ -380,6 +406,13 @@ int sh_launch(HMODULE module, void *engine, void *client_user,
+         if (running) stopped_at = 0;
+         else if (seen_running) {
+             if (!stopped_at) stopped_at = o->now_ms();
++            if (o->now_ms() - stopped_at >= 3000 && keep_alive_running()) {
++                /* madeira-bcd: MADEIRA_DOCK_KEEP_ALIVE -- a named helper (a
++                 * self-updating launcher) still runs: hold the session. */
++                static bool kept;
++                if (!kept) { kept = true; o->event("launch-keep-alive", 1); }
++                stopped_at = o->now_ms();
++            }
+             if (o->now_ms() - stopped_at >= 3000) {
+                 o->event("launch-game-ended", 1);
+                 result = result_received && !result_rejected ? 0 : 46;
+-- 
+2.50.0.windows.1
+
