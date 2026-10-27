@@ -435,11 +435,34 @@ final class GamepadInput: @unchecked Sendable {
 }
 
 /// iOS 18 otherwise routes stick input into UIKit/SwiftUI focus navigation.
+///
+/// The claim goes on the window, not through `.handlesGameControllerEvents`:
+/// that modifier wraps the content in an interaction view sized to the safe
+/// area, and on the iPhone Duo's inner screen iOS 27 puts the navigation bar,
+/// toolbar and tab bar in a rail inside the trailing safe-area inset. A touch
+/// there fell outside the wrapper, so hit-testing never reached the rail and
+/// Add, Library options and Settings did nothing.
 struct ClaimGamepadEvents: ViewModifier {
     func body(content: Content) -> some View {
-        if #available(iOS 18.0, *), GamepadInput.enabled {
-            content.handlesGameControllerEvents(matching: .gamepad)
-        } else { content }
+        content.background(WindowClaim())
+    }
+
+    private struct WindowClaim: UIViewRepresentable {
+        func makeUIView(context: Context) -> ClaimView { ClaimView() }
+        func updateUIView(_ view: ClaimView, context: Context) {}
+
+        final class ClaimView: UIView {
+            override init(frame: CGRect) {
+                super.init(frame: frame)
+                isUserInteractionEnabled = false
+                isAccessibilityElement = false
+            }
+            @available(*, unavailable) required init?(coder: NSCoder) { nil }
+            override func didMoveToWindow() {
+                super.didMoveToWindow()
+                if let window { GamepadEventClaim.install(on: window) }
+            }
+        }
     }
 }
 
