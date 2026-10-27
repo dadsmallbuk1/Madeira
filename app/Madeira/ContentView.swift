@@ -4015,6 +4015,14 @@ final class ControlsWindow: UIWindow {
         // Edit mode owns the whole screen: drags and the scale pinch must not
         // leak through and swing the camera while you are arranging buttons.
         if m.editing { return super.hitTest(point, with: event) }
+        let library = LibraryModel.shared
+        // The library itself, between sessions (a start that did not happen, or
+        // one that ended): nothing here. First, before the layout menu's test
+        // below: on the iPhone Duo, iOS 27 adds the side rail's views (status
+        // bar column, bar items) to this window's controller too, outside the
+        // hosting view, and that test claimed every touch on the library's own
+        // rail, so Add, Library options and Settings never fired.
+        if library.enabled && library.current == nil && library.preparing == nil { return nil }
         // ml1970: the layout menu and its dialogs are UIKit presentations
         // outside the hosting view (an alert's dimming view covers the screen).
         // While one is up it takes the touches it covers; otherwise its buttons
@@ -4024,11 +4032,8 @@ final class ControlsWindow: UIWindow {
         // A library session (Library.swift), in either orientation: its in-game
         // menu and starting screen take every touch; otherwise only its menu
         // button, its performance overlay and the touch controls do.
-        let library = LibraryModel.shared
         // A Play getting ready: its starting screen takes every touch.
         if library.preparing != nil { return super.hitTest(point, with: event) }
-        // The library itself, between sessions (a start that did not happen): nothing here.
-        if library.enabled && library.current == nil { return nil }
         if library.current != nil {
             if library.menu || library.launching || library.menuButtonRect.contains(point) ||
                 (library.performance && library.performanceRect.contains(point)) {
